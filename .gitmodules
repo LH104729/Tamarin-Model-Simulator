@@ -1,0 +1,3 @@
+[submodule "deps/vscode-tamarin"]
+	path = deps/vscode-tamarin
+	url = https://github.com/tamarin-prover/vscode-tamarin.git
