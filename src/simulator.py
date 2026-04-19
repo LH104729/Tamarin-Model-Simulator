@@ -8,15 +8,89 @@ from src.default_rules import get_default_rules
 from src.default_equations import get_default_equations
 
 
+class History:
+  trace: list[list[Fact]]
+  state: dict[Fact, int]
+  fresh_instance_counter: dict[Term, int]
+  history: list[tuple[list[Fact], list[Fact]]]
+  time: int
+  max_time: int
+
+  def __init__(self):
+    self.trace = []
+    self.state = {}
+    self.fresh_instance_counter = {}
+    self.history = []
+
+    self.time = 0
+    self.max_time = 0
+
+  def add_fact(self, fact: Fact, count: int = 1):
+    self.state[fact] = self.state.get(fact, 0) + count
+
+  def remove_fact(self, fact: Fact, count: int = 1):
+    if self.state.get(fact, 0) < count:
+      raise ValueError(
+        f"Cannot remove {count} instances of fact {fact} from the multiset"
+      )
+    self.state[fact] -= count
+    if self.state[fact] == 0:
+      del self.state[fact]
+
+  def contains_fact(self, fact: Fact, count: int = 1) -> bool:
+    return self.state.get(fact, 0) >= count
+
+  def step(
+    self,
+    facts_to_remove: dict[Fact, int],
+    facts_to_add: dict[Fact, int],
+    actions: list[Fact],
+  ):
+    self.time = self.time + 1
+    if self.time <= self.max_time:
+      self.history = self.history[: self.time - 1]
+      self.trace = self.trace[: self.time - 1]
+    self.max_time = self.time
+
+    for fact, count in facts_to_remove:
+      self.remove_fact(fact, count)
+    for fact, count in facts_to_add:
+      self.add_fact(fact, count)
+    self.trace.append(actions)
+    self.history.append((facts_to_remove, facts_to_add))
+
+  def undo(self):
+    if self.time == 0:
+      return False
+    self.time = self.time - 1
+    facts_to_remove, facts_to_add = self.history[self.time]
+    for fact, count in facts_to_add:
+      self.remove_fact(fact, count)
+    for fact, count in facts_to_remove:
+      self.add_fact(fact, count)
+
+  def redo(self):
+    if self.time >= self.max_time:
+      return False
+    facts_to_remove, facts_to_add = self.history[self.time]
+    for fact, count in facts_to_remove:
+      self.remove_fact(fact, count)
+    for fact, count in facts_to_add:
+      self.add_fact(fact, count)
+    self.time = self.time + 1
+    return True
+
+
 class Simulator:
   def __init__(self, rules: list[RewriteRule] = [], built_ins: list[str] = []):
     self.rules: dict[str, RewriteRule] = {rule.name: rule for rule in rules}
     self.rule_names: list[str] = list(self.rules.keys())
     self.attacker_rule_names: list[str] = []
-    self.trace: list[tuple[Fact, int]] = []
     self.fresh_instance_counter: dict[Term, int] = {}
-    self.state: dict[Fact, int] = {}
-    self.time: int = 0
+    # self.trace: list[tuple[Fact, int]] = []
+    # self.state: dict[Fact, int] = {}
+    # self.time: int = 0
+    self.state: History = History()
     self.equational_theory: EquationalTheory = EquationalTheory()
 
     for built_in in ["default"] + built_ins:
@@ -26,14 +100,6 @@ class Simulator:
           self.rules[rule.name] = rule
           self.attacker_rule_names.append(rule.name)
       self.equational_theory.add_equations(get_default_equations(built_in))
-
-  def print_state(self):
-    print(
-      f"[{','.join([fact.__str__() for fact, count in self.state.items() for _ in range(count)])}]"
-    )
-
-  def print_trace(self):
-    print(f"[{', '.join(f'{time}@{fact}' for fact, time in self.trace)}]")
 
   def get_rule_possible_values(
     self, rule_name: str, selected_facts: dict[Fact, Fact] = {}
@@ -63,7 +129,7 @@ class Simulator:
     for fact in rule.premises:
       if fact not in possible_facts:
         possible_facts[fact] = set()
-        for state_fact in self.state.keys():
+        for state_fact in self.state.state.keys():
           renaming_map = self.equational_theory.renamable_to(
             fact, state_fact, restriction=restriction
           )
@@ -132,35 +198,27 @@ class Simulator:
     for fact, count in required_facts.items():
       if fact.name == "Fr":
         continue
-      elif self.state.get(fact, 0) < count:
+      elif not self.state.contains_fact(fact, count):
         print(f"Cannot apply rule {rule_name}: not enough instances of fact {fact}")
         return False
 
     # Update the fresh instance counter
     for t, count in fresh_terms_update.items():
       self.fresh_instance_counter[t] = count
-    # Remove the required facts from the state
-    for fact, count in required_facts.items():
-      if fact.name == "Fr":
-        continue
-      if fact.is_presistent:
-        continue
-      self.state[fact] -= count
-      if self.state[fact] == 0:
-        del self.state[fact]
 
-    # Compute the action facts
-    self.time += 1
-    for action_fact in rule.actions:
-      renamed_fact = action_fact.rename(renaming_map)
-      self.trace.append((renamed_fact, self.time))
+    facts_to_remove = {
+      k: v for k, v in required_facts.items() if not k.is_presistent and k.name != "Fr"
+    }
+    action_facts = [
+      self.equational_theory.normal_form(fact.rename(renaming_map))
+      for fact in rule.actions
+    ]
+    facts_to_add = {
+      self.equational_theory.normal_form(fact.rename(renaming_map)): 1
+      for fact in rule.conclusion
+    }
 
-    # Compute the produced facts
-    for conclusion_fact in rule.conclusion:
-      renamed_fact = self.equational_theory.normal_form(
-        conclusion_fact.rename(renaming_map)
-      )
-      self.state[renamed_fact] = self.state.get(renamed_fact, 0) + 1
+    self.state.step(facts_to_remove.items(), facts_to_add.items(), action_facts)
     return True
 
 

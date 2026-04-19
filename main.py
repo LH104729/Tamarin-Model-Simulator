@@ -138,6 +138,8 @@ class RuleApplyScreen(Screen):
 class TamarinModelSimulator(App):
   BINDINGS = [
     Binding(key="q", action="quit", description="Quit"),
+    Binding(key="u", action="undo()", description="Undo"),
+    Binding(key="U", action="redo()", description="Redo"),
   ]
   simulator: reactive[Simulator] = reactive(Simulator, recompose=True)
 
@@ -154,53 +156,6 @@ class TamarinModelSimulator(App):
   def compose(self) -> ComposeResult:
     with Horizontal():
       with Container():
-        with Container():
-          with TabbedContent(
-            initial=self.selected_tabs.get("state_tabs"), id="state_tabs"
-          ):
-            with TabPane("State", id="state_tab"):
-              yield ListView(
-                *[
-                  ListItem(
-                    Static(f"{fact} (x{count})" if count > 1 else str(fact)),
-                    name=str(fact),
-                  )
-                  for fact, count in self.simulator.state.items()
-                  if fact.name not in ["Out", "In", "KU", "KD"]
-                ],
-              )
-            with TabPane("In/Out", id="io_tab"):
-              yield ListView(
-                *[
-                  ListItem(
-                    Static(f"{fact} (x{count})" if count > 1 else str(fact)),
-                    name=str(fact),
-                  )
-                  for fact, count in self.simulator.state.items()
-                  if fact.name in ["Out", "In"]
-                ],
-              )
-            with TabPane("KU/KD", id="k_tab"):
-              yield ListView(
-                *[
-                  ListItem(
-                    Static(f"{fact} (x{count})" if count > 1 else str(fact)),
-                    name=str(fact),
-                  )
-                  for fact, count in self.simulator.state.items()
-                  if fact.name in ["KU", "KD"]
-                ],
-              )
-        with Container():
-          yield Static("Trace:", id="trace_title")
-          yield ListView(
-            *[
-              ListItem(Static(f"{fact}@{time}"), name=str(fact))
-              for fact, time in self.simulator.trace[::-1]
-            ],
-            id="trace_list",
-          )
-      with Container():
         with TabbedContent(
           initial=self.selected_tabs.get("rules_tabs"), id="rules_tabs"
         ):
@@ -214,6 +169,48 @@ class TamarinModelSimulator(App):
               *[ListItem(Static(r), name=r) for r in self.attacker_rule_names],
               id="attacker_rules_list",
             )
+      with Container():
+        with Container():
+          with TabbedContent(
+            initial=self.selected_tabs.get("state_tabs"), id="state_tabs"
+          ):
+            with TabPane("State", id="state_tab"):
+              with ListView():
+                for fact, count in self.simulator.state.state.items():
+                  if fact.name not in ["Out", "In", "KU", "KD"]:
+                    yield ListItem(
+                      Static(f"{fact} (x{count})" if count > 1 else str(fact)),
+                      name=str(fact),
+                    )
+            with TabPane("In/Out", id="io_tab"):
+              with ListView():
+                for fact, count in self.simulator.state.state.items():
+                  if fact.name in ["Out", "In"]:
+                    yield ListItem(
+                      Static(f"{fact} (x{count})" if count > 1 else str(fact)),
+                      name=str(fact),
+                    )
+            with TabPane("KU/KD", id="k_tab"):
+              with ListView():
+                for fact, count in self.simulator.state.state.items():
+                  if fact.name not in ["KU", "KD"]:
+                    yield ListItem(
+                      Static(f"{fact} (x{count})" if count > 1 else str(fact)),
+                      name=str(fact),
+                    )
+        with Container():
+          yield Static("Trace:", id="trace_title")
+          with ListView(id="trace_list"):
+            for idx, facts in enumerate(
+              reversed(self.simulator.state.trace[: self.simulator.state.time])
+            ):
+              if len(facts) != 0:
+                yield ListItem(
+                  Static(f"--- Time {self.simulator.state.time - idx} ---"),
+                  name=f"time_{self.simulator.state.time - idx}",
+                )
+                for fact in facts:
+                  yield ListItem(Static(str(fact)), name=str(fact))
     yield Footer()
 
   def recompose_simulator(self):
@@ -233,6 +230,14 @@ class TamarinModelSimulator(App):
     self.selected_tabs[event.tabbed_content.id] = event.tabbed_content.get_pane(
       event.tab
     ).id
+
+  def action_undo(self):
+    self.simulator.state.undo()
+    self.recompose_simulator()
+
+  def action_redo(self):
+    self.simulator.state.redo()
+    self.recompose_simulator()
 
 
 def parse_args():

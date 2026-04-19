@@ -17,6 +17,11 @@ class Sort(Enum):
 
 
 class Term:
+  name: str
+  subterm: list["Term"]
+  sort: Sort
+  is_constant: bool
+
   def __init__(
     self,
     name: str,
@@ -122,6 +127,10 @@ class Term:
 
 
 class Fact:
+  name: str
+  terms: list[Term]
+  is_presistent: bool
+
   def __init__(self, name: str, terms: list[Term], is_presistent=False):
     self.name = name
     self.terms = terms
@@ -174,6 +183,13 @@ class Fact:
 
 
 class RewriteRule:
+  name: str
+  premises: list[Fact]
+  actions: list[Fact]
+  conclusion: list[Fact]
+  atomic_terms: set[Term]
+  required_public_terms: list[Term]
+
   def __init__(
     self,
     name: str,
@@ -208,6 +224,8 @@ class RewriteRule:
 
 
 class EquationalTheory:
+  eqautions: list[Equation]
+
   def __init__(self, equations: list[tuple[Term, Term]] = []):
     self.equations = equations
 
