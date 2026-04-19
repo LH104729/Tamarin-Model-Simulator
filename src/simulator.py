@@ -68,6 +68,7 @@ class History:
       self.remove_fact(fact, count)
     for fact, count in facts_to_remove:
       self.add_fact(fact, count)
+    return True
 
   def redo(self):
     if self.time >= self.max_time:
