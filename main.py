@@ -108,7 +108,9 @@ class RuleApplyScreen(Screen):
       if value_str == "":
         self.public_assignments.pop(p, None)
       else:
-        self.public_assignments[p] = Term(value_str, sort=p.sort)
+        self.public_assignments[p] = Term(
+          f"'{value_str}'", sort=p.sort, is_constant=True
+        )
 
   def action_clear(self):
     self.selected_values = {}
@@ -193,7 +195,7 @@ class TamarinModelSimulator(App):
             with TabPane("KU/KD", id="k_tab"):
               with ListView():
                 for fact, count in self.simulator.state.state.items():
-                  if fact.name not in ["KU", "KD"]:
+                  if fact.name in ["KU", "KD"]:
                     yield ListItem(
                       Static(f"{fact} (x{count})" if count > 1 else str(fact)),
                       name=str(fact),

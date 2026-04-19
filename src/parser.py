@@ -24,12 +24,34 @@ def parse_term(node: Node) -> Term:
   if node.type in ["mset_term", "nat_term", "xor_term", "mul_term", "exp_term"]:
     if node.child_count == 1:
       return parse_term(node.children[0])
+    if node.type not in ["nat_term"]:
+      raise NotImplementedError(f"Unsupported term type: {node.type}")
     subterms = []
     for term_node in node.children:
-      if term_node.type in ["++", "+", "%+", "XOR", "⊕", "^"]:
+      if term_node.type in ["++", "+", "%+", "XOR", "⊕", "*", "^"]:
         continue
       subterms.append(parse_term(term_node))
-    return Term(node.type[:-5], subterms)
+    node_name = node.type[:-5]
+
+    const_1_count = 0
+    i = 0
+    while i < len(subterms):
+      if subterms[i].name == node_name:
+        subterms = subterms[:i] + subterms[i].subterm + subterms[i + 1 :]
+      elif subterms[i].name == "1" and subterms[i].sort == Sort.NAT:
+        const_1_count += 1
+        subterms.pop(i)
+      else:
+        i = i + 1
+
+    subterms = [
+      Term("1", [], Sort.NAT, is_constant=True) for _ in range(const_1_count)
+    ] + subterms
+    while len(subterms) > 2:
+      right = subterms.pop()
+      left = subterms.pop()
+      subterms.append(Term(node_name, [left, right], Sort.NAT))
+    return Term(node_name, subterms, Sort.NAT)
   if node.type in [
     "pub_var",
     "fresh_var",
@@ -47,6 +69,10 @@ def parse_term(node: Node) -> Term:
       if term_node.type == ",":
         continue
       subterms.append(parse_term(term_node))
+    while len(subterms) > 2:
+      right = subterms.pop()
+      left = subterms.pop()
+      subterms.append(Term("pair", [left, right]))
     return Term("pair", subterms)
   if node.type == "nary_app":
     func_name = parse_ident(node.children[0])

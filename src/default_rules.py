@@ -41,6 +41,14 @@ BUILTIN_RULES: dict[str, list[RewriteRule]] = {
       conclusion=[Fact("KU", [Term("x", sort=Sort.PUB)], is_presistent=True)],
     ),
     RewriteRule(
+      name="nat",
+      premises=[],
+      actions=[],
+      conclusion=[
+        Fact("KU", [Term("1", sort=Sort.NAT, is_constant=True)], is_presistent=True)
+      ],
+    ),
+    RewriteRule(
       name="fresh",
       premises=[Fact("Fr", [Term("x", sort=Sort.FRESH)])],
       actions=[Fact("KU", [Term("x", sort=Sort.FRESH)], is_presistent=True)],
@@ -55,7 +63,7 @@ BUILTIN_RULES: dict[str, list[RewriteRule]] = {
 
 
 def get_default_rules(built_in: str = "default") -> list[RewriteRule]:
-  base_rules = BUILTIN_RULES.get(built_in)
+  base_rules = BUILTIN_RULES.get(built_in, [])
   for function_name, arity in BUILTIN_FUNCTIONS.get(built_in, []):
     base_rules.append(
       RewriteRule(

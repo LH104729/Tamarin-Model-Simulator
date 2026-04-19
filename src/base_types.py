@@ -100,6 +100,8 @@ class Term:
       return None
     if not self.subterm:
       return {self: other}
+    if self.name != other.name:
+      return None
     if len(self.subterm) != len(other.subterm):
       return None
     renaming_map: dict[Term, Term] = restriction.copy()

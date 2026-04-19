@@ -87,9 +87,6 @@ class Simulator:
     self.rule_names: list[str] = list(self.rules.keys())
     self.attacker_rule_names: list[str] = []
     self.fresh_instance_counter: dict[Term, int] = {}
-    # self.trace: list[tuple[Fact, int]] = []
-    # self.state: dict[Fact, int] = {}
-    # self.time: int = 0
     self.state: History = History()
     self.equational_theory: EquationalTheory = EquationalTheory()
 
@@ -163,8 +160,6 @@ class Simulator:
             return None
         else:
           restriction[k] = v
-    # if not all(term in restriction for term in self.rules[rule_name].atomic_terms):
-    #   return None
     return restriction
 
   def apply_rule(self, rule_name: str, renaming_map: dict[Term, Term]):
@@ -184,9 +179,16 @@ class Simulator:
 
     # Check if all atomic terms are in the renaming map
     for term in rule.atomic_terms:
-      if term not in renaming_map and term not in rule.required_public_terms:
-        print(f"Cannot apply rule {rule_name}: term {term} is not in the renaming map")
-        return False
+      if term not in renaming_map:
+        if term in rule.required_public_terms:
+          renaming_map[term] = Term(
+            f"'{term.name}'", deepcopy(term.subterm), sort=Sort.PUB, is_constant=True
+          )
+        else:
+          print(
+            f"Cannot apply rule {rule_name}: term {term} is not in the renaming map"
+          )
+          return False
 
     # Compute the required facts
     required_facts: dict[Fact, int] = {}
