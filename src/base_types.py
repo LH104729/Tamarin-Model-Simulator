@@ -33,7 +33,7 @@ class Term:
 
   def __str__(self):
     if self.subterm:
-      if self.name == "tuple":
+      if self.name == "pair":
         return f"<{', '.join(str(s) for s in self.subterm)}>"
       elif self.name in ["mset", "nat", "xor", "mul", "exp"]:
         op = {"mset": "++", "nat": "%+", "xor": "⊕", "mul": "*", "exp": "^"}[self.name]
@@ -110,7 +110,7 @@ class Term:
           renaming_map[k] = v
     return renaming_map
 
-  def renamable_to_subterm_of(self, other: 'Term') -> dict['Term', 'Term'] | None:
+  def renamable_to_subterm_of(self, other: "Term") -> dict["Term", "Term"] | None:
     renaming_map = self.renamable_to(other)
     if renaming_map is not None:
       return renaming_map
@@ -119,6 +119,7 @@ class Term:
       if renaming_map is not None:
         return renaming_map
     return None
+
 
 class Fact:
   def __init__(self, name: str, terms: list[Term], is_presistent=False):
@@ -205,9 +206,13 @@ class RewriteRule:
   def __str__(self):
     return f"{self.name}: \n[{', \n'.join(str(p) for p in self.premises)}]\n --[{', \n'.join(str(a) for a in self.actions)}]->\n [{', \n'.join(str(a) for a in self.conclusion)}]"
 
+
 class EquationalTheory:
   def __init__(self, equations: list[tuple[Term, Term]] = []):
     self.equations = equations
+
+  def add_equations(self, equations: list[Equation] = []):
+    self.equations.extend(equations)
 
   @cache
   def normal_form(self, term: Term | Fact) -> Term | Fact:

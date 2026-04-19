@@ -11,6 +11,8 @@ from textual.widgets import (
   ListItem,
   Select,
   Input,
+  TabbedContent,
+  TabPane,
 )
 
 from textual.screen import Screen
@@ -142,58 +144,95 @@ class TamarinModelSimulator(App):
   def __init__(self, simulator: Simulator):
     super().__init__()
     self.simulator = simulator
-    self.rule_names = list(self.simulator.rules.keys())
+    self.rule_names = list(self.simulator.rule_names)
+    self.attacker_rule_names = list(self.simulator.attacker_rule_names)
+    self.selected_tabs = {
+      "state_tabs": "state_tab",
+      "rules_tabs": "rules_tab",
+    }
 
   def compose(self) -> ComposeResult:
-    yield Horizontal(
-      Container(
-        Container(
-          Static("State:", id="state_title"),
-          ListView(
-            *[
-              ListItem(
-                Static(f"{fact} (x{count})" if count > 1 else str(fact)),
-                name=str(fact),
+    with Horizontal():
+      with Container():
+        with Container():
+          with TabbedContent(
+            initial=self.selected_tabs.get("state_tabs"), id="state_tabs"
+          ):
+            with TabPane("State", id="state_tab"):
+              yield ListView(
+                *[
+                  ListItem(
+                    Static(f"{fact} (x{count})" if count > 1 else str(fact)),
+                    name=str(fact),
+                  )
+                  for fact, count in self.simulator.state.items()
+                  if fact.name not in ["Out", "In", "KU", "KD"]
+                ],
               )
-              for fact, count in self.simulator.state.items()
-            ],
-            id="state_list",
-          ),
-          id="state_container",
-        ),
-        Container(
-          Static("Trace:", id="trace_title"),
-          ListView(
+            with TabPane("In/Out", id="io_tab"):
+              yield ListView(
+                *[
+                  ListItem(
+                    Static(f"{fact} (x{count})" if count > 1 else str(fact)),
+                    name=str(fact),
+                  )
+                  for fact, count in self.simulator.state.items()
+                  if fact.name in ["Out", "In"]
+                ],
+              )
+            with TabPane("KU/KD", id="k_tab"):
+              yield ListView(
+                *[
+                  ListItem(
+                    Static(f"{fact} (x{count})" if count > 1 else str(fact)),
+                    name=str(fact),
+                  )
+                  for fact, count in self.simulator.state.items()
+                  if fact.name in ["KU", "KD"]
+                ],
+              )
+        with Container():
+          yield Static("Trace:", id="trace_title")
+          yield ListView(
             *[
               ListItem(Static(f"{fact}@{time}"), name=str(fact))
               for fact, time in self.simulator.trace[::-1]
             ],
             id="trace_list",
-          ),
-          id="trace_container",
-        ),
-      ),
-      Container(
-        Static("Rules:", id="rules_title"),
-        ListView(
-          *[ListItem(Static(r), name=r) for r in self.rule_names],
-          id="rules_list",
-        ),
-        id="rules_container",
-      ),
-    )
+          )
+      with Container():
+        with TabbedContent(
+          initial=self.selected_tabs.get("rules_tabs"), id="rules_tabs"
+        ):
+          with TabPane("Rules", id="rules_tab"):
+            yield ListView(
+              *[ListItem(Static(r), name=r) for r in self.rule_names],
+              id="rules_list",
+            )
+          with TabPane("KU/KD Rules", id="k_rules_tab"):
+            yield ListView(
+              *[ListItem(Static(r), name=r) for r in self.attacker_rule_names],
+              id="attacker_rules_list",
+            )
     yield Footer()
 
   def recompose_simulator(self):
     self.mutate_reactive(TamarinModelSimulator.simulator)
 
   def on_list_view_selected(self, event):
-    if event.list_view.id == "rules_list":
+    if (
+      event.list_view.id == "rules_list" or event.list_view.id == "attacker_rules_list"
+    ):
       rule_name = event.item.name
       rule = self.simulator.rules[rule_name]
       self.app.push_screen(
         RuleApplyScreen(rule, self.simulator, self.recompose_simulator)
       )
+
+  def on_tabbed_content_tab_activated(self, event):
+    self.selected_tabs[event.tabbed_content.id] = event.tabbed_content.get_pane(
+      event.tab
+    ).id
 
 
 def parse_args():

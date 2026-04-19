@@ -47,7 +47,7 @@ def parse_term(node: Node) -> Term:
       if term_node.type == ",":
         continue
       subterms.append(parse_term(term_node))
-    return Term("tuple", subterms)
+    return Term("pair", subterms)
   if node.type == "nary_app":
     func_name = parse_ident(node.children[0])
     assert node.children[1].type == "("

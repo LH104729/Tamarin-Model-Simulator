@@ -2,24 +2,30 @@ from copy import deepcopy
 import tree_sitter_spthy as tsspthy
 from tree_sitter import Language, Parser, Node
 
-from src.base_types import Sort, Term, Fact, RewriteRule, Equation, EquationalTheory
+from src.base_types import Sort, Term, Fact, RewriteRule, EquationalTheory
 from src.parser import parse_rule
 from src.default_rules import get_default_rules
 from src.default_equations import get_default_equations
 
 
 class Simulator:
-  def __init__(self, rules: list[RewriteRule] = [], equations: list[Equation] = []):
+  def __init__(self, rules: list[RewriteRule] = [], built_ins: list[str] = []):
     self.rules: dict[str, RewriteRule] = {rule.name: rule for rule in rules}
+    self.rule_names: list[str] = list(self.rules.keys())
+    self.attacker_rule_names: list[str] = []
     self.trace: list[tuple[Fact, int]] = []
     self.fresh_instance_counter: dict[Term, int] = {}
     self.state: dict[Fact, int] = {}
     self.time: int = 0
-    self.equational_theory: EquationalTheory = EquationalTheory(equations)
+    self.equational_theory: EquationalTheory = EquationalTheory()
 
-    for rule in get_default_rules():
-      if rule.name not in self.rules:
-        self.rules[rule.name] = rule
+    for built_in in ["default"] + built_ins:
+      attacker_rules = get_default_rules(built_in)
+      for rule in attacker_rules:
+        if rule.name not in self.rules:
+          self.rules[rule.name] = rule
+          self.attacker_rule_names.append(rule.name)
+      self.equational_theory.add_equations(get_default_equations(built_in))
 
   def print_state(self):
     print(
@@ -180,9 +186,9 @@ def simulator_from_path(model_file: str) -> Simulator:
   rules: list[RewriteRule] = []
   for node in rule_nodes:
     rules.append(parse_rule(node))
-  equations: list[Equation] = []
+  built_ins: list[str] = []
   for node in built_ins_nodes:
     for child in node.children:
       if child.type == "built_in":
-        equations.extend(get_default_equations(child.text.decode()))
-  return Simulator(rules, equations)
+        built_ins.append(child.text.decode())
+  return Simulator(rules, built_ins)
