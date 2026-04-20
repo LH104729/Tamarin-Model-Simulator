@@ -115,13 +115,13 @@ class TamarinModelSimulator(App):
                     yield Select(
                       (
                         (str(fact), fact)
-                        for fact in sorted(self.possible_facts[p], key=str)
+                        for fact in sorted(self.possible_facts.get(p, []), key=str)
                       ),
                       value=self.selected_values.get(
                         p,
                         Select.NULL
-                        if len(self.possible_facts[p]) != 1
-                        else next(iter(self.possible_facts[p])),
+                        if len(self.possible_facts.get(p, [])) != 1
+                        else next(iter(self.possible_facts.get(p, []))),
                       ),
                       id=f"premise_select_{i}",
                       classes="hide" if p.name == "Fr" else "show",
@@ -207,11 +207,12 @@ class TamarinModelSimulator(App):
       event.list_view.id == "rules_list" or event.list_view.id == "attacker_rules_list"
     ):
       selected_rule = self.simulator.rules[event.item.name]
-      self.possible_facts = self.simulator.get_rule_possible_values(selected_rule.name)
+      self.possible_facts, self.status = self.simulator.get_rule_possible_values(
+        selected_rule.name
+      )
       self.selected_values = {}
       self.public_assignments = {}
       self.selected_rule = selected_rule
-      self.status = ""
 
       self.selected_tabs["rules_tabs"] = "apply_tab"
       self.query_one("#rules_tabs", TabbedContent).active = "apply_tab"
@@ -227,7 +228,7 @@ class TamarinModelSimulator(App):
         self.selected_values[p] = event.value
       else:
         self.selected_values.pop(p, None)
-      self.possible_facts = self.simulator.get_rule_possible_values(
+      self.possible_facts, self.status = self.simulator.get_rule_possible_values(
         self.selected_rule.name, self.selected_values
       )
       self.mutate_reactive(TamarinModelSimulator.possible_facts)
@@ -239,7 +240,7 @@ class TamarinModelSimulator(App):
     if self.selected_rule is None:
       return
     self.selected_values = {}
-    self.possible_facts = self.simulator.get_rule_possible_values(
+    self.possible_facts, self.status = self.simulator.get_rule_possible_values(
       self.selected_rule.name
     )
 
@@ -256,6 +257,7 @@ class TamarinModelSimulator(App):
       self.selected_rule.name, renaming_map
     ):
       self.selected_rule = None
+      self.selected_values = {}
       self.selected_tabs["rules_tabs"] = "rules_tab"
       self.query_one("#rules_tabs", TabbedContent).active = "rules_tab"
       self.status = "Rule applied successfully"

@@ -1,5 +1,13 @@
 from tree_sitter import Node
-from .base_types import Fact, RewriteRule, Sort, Term
+from .base_types import Fact, Formula, FormulaType, RewriteRule, Sort, Term, Restriction
+
+
+def walk(node: Node, indent: int = 0, max_depth: int = -1):
+  if max_depth == 0:
+    return
+  print("  " * indent + f"{node.type}: {node.text.decode()}")
+  for child in node.children:
+    walk(child, indent + 1, max_depth - 1 if max_depth > 0 else -1)
 
 
 def parse_ident(node: Node) -> str:
@@ -8,16 +16,22 @@ def parse_ident(node: Node) -> str:
 
 
 def parse_var(node: Node) -> Term:
+  name = None
+  for child in node.children:
+    if child.type == "ident":
+      name = child.text.decode()
   if node.type == "pub_var":
-    return Term(node.text.decode()[1:], [], Sort.PUB)
+    return Term(name, [], Sort.PUB)
   elif node.type == "pub_name":
     return Term(node.text.decode(), [], Sort.PUB, is_constant=True)
   elif node.type == "fresh_var":
-    return Term(node.text.decode()[1:], [], Sort.FRESH)
+    return Term(name, [], Sort.FRESH)
   elif node.type == "nat_var":
-    return Term(node.text.decode()[1:], [], Sort.NAT)
+    return Term(name, [], Sort.NAT)
   elif node.type == "msg_var_or_nullary_fun":
-    return Term(node.text.decode(), [], Sort.MSG)
+    return Term(name, [], Sort.MSG)
+  elif node.type == "temporal_var":
+    return Term(name, [], Sort.TEMPORAL)
 
 
 def parse_term(node: Node) -> Term:
@@ -149,3 +163,98 @@ def parse_rule(node: Node) -> RewriteRule:
         conclusion.append(parse_fact(fact_node).rename(renaming_map))
 
   return RewriteRule(name, premises, actions, conclusion)
+
+
+def parse_formula(node: Node) -> Formula:
+  if node.type in [
+    "pub_var",
+    "fresh_var",
+    "msg_var_or_nullary_fun",
+    "nat_var",
+    "pub_name",
+    "temporal_var",
+  ]:
+    return parse_var(node)
+
+  formula = Formula()
+  if node.type == "imp":
+    if node.child_count == 1:
+      return parse_formula(node.children[0])
+    assert node.child_count == 3
+    assert node.children[1].type in ["==>", "⇒"]
+    return Formula(
+      FormulaType.IMPLICATION,
+      [parse_formula(node.children[0]), parse_formula(node.children[2])],
+    )
+  elif node.type == "nested_formula":
+    return parse_formula(node.children[1])
+  elif node.type in ["disjunction", "conjunction"]:
+    if node.child_count == 1:
+      return parse_formula(node.children[0])
+    formula.type = (
+      FormulaType.DISJUNCTION if node.type == "disjunction" else FormulaType.CONJUNCTION
+    )
+    formula.subformulas = [
+      parse_formula(child)
+      for child in node.children
+      if child.type not in ["|", "∨", "&", "∧"]
+    ]
+    return formula
+  elif node.type == "quantified_formula":
+    formula.type = (
+      FormulaType.EXISTS if node.children[0].type in ["Ex", "∃"] else FormulaType.FORALL
+    )
+    variables = Formula(
+      FormulaType.ATOM, [parse_formula(child) for child in node.children[1:-2]]
+    )
+    subformula = parse_formula(node.children[-1])
+    formula.subformulas = [variables, subformula]
+    return formula
+  elif node.type == "negation":
+    return Formula(FormulaType.NEGATION, [parse_formula(node.children[1])])
+  elif node.type == "term_eq":
+    return Formula(
+      FormulaType.TERM_EQ, [parse_term(node.children[0]), parse_term(node.children[2])]
+    )
+  elif node.type == "subterm_rel":
+    return Formula(
+      FormulaType.SUBTERM_REL,
+      [parse_term(node.children[0]), parse_term(node.children[2])],
+    )
+  elif node.type == "action_constraint":
+    return Formula(
+      FormulaType.ATOM, [parse_fact(node.children[0]), parse_var(node.children[2])]
+    )
+  else:
+    raise NotImplementedError(f"Unsupported formula type: {node.type}")
+  return formula
+
+
+def parse_restriction(node: Node) -> Restriction | None:
+  assert node.type == "restriction"
+  assert node.children[0].type == "restriction"
+  restriction_name = node.children[1].text.decode()
+  formula: Formula = parse_formula(node.children[-2])
+
+  # Check if formula is of the form "forall xs #t. Fact(xs)@#t => f(xs)"
+  if not (
+    formula.type == FormulaType.FORALL
+    and formula.subformulas[1].type == FormulaType.IMPLICATION
+    and formula.subformulas[1].subformulas[0].type == FormulaType.ATOM
+  ):
+    return None
+
+  fact = formula.subformulas[1].subformulas[0].subformulas[0]
+
+  # Check that f(x) is quantifier-free
+  def is_quantifier_free(f: Formula) -> bool:
+    if type(f) is Term:
+      return True
+    if f.type in [FormulaType.EXISTS, FormulaType.FORALL, FormulaType.ATOM]:
+      return False
+    return all(is_quantifier_free(subf) for subf in f.subformulas)
+
+  if not is_quantifier_free(formula.subformulas[1].subformulas[1]):
+    return None
+
+  return Restriction(restriction_name, fact, formula.subformulas[1].subformulas[1])

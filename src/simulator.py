@@ -1,11 +1,12 @@
 from copy import deepcopy
 import tree_sitter_spthy as tsspthy
 from tree_sitter import Language, Parser, Node
+from .utils import dict_union
 
-from src.base_types import Sort, Term, Fact, RewriteRule, EquationalTheory
-from src.parser import parse_rule
-from src.default_rules import get_default_rules
-from src.default_equations import get_default_equations
+from .base_types import Restriction, Sort, Term, Fact, RewriteRule, EquationalTheory
+from .parser import parse_rule, parse_restriction
+from .default_rules import get_default_rules
+from .default_equations import get_default_equations
 
 
 class History:
@@ -83,13 +84,29 @@ class History:
 
 
 class Simulator:
-  def __init__(self, rules: list[RewriteRule] = [], built_ins: list[str] = []):
+  def __init__(
+    self,
+    rules: list[RewriteRule] = [],
+    built_ins: list[str] = [],
+    restrictions: list[Restriction] = [],
+  ):
     self.rules: dict[str, RewriteRule] = {rule.name: rule for rule in rules}
     self.rule_names: list[str] = list(self.rules.keys())
     self.attacker_rule_names: list[str] = []
     self.fresh_instance_counter: dict[Term, int] = {}
     self.state: History = History()
     self.equational_theory: EquationalTheory = EquationalTheory()
+    self.restrictions: dict[str, list[Restriction]] = {}
+
+    for restriction in restrictions:
+      if restriction.fact.name not in self.restrictions:
+        self.restrictions[restriction.fact.name] = []
+      self.restrictions[restriction.fact.name].append(restriction)
+
+    for name, rule in self.rules.items():
+      for action_fact in rule.actions:
+        if action_fact.name in self.restrictions:
+          rule.restriction_action_facts.append(action_fact)
 
     for built_in in ["default"] + built_ins:
       attacker_rules = get_default_rules(built_in)
@@ -101,44 +118,59 @@ class Simulator:
 
   def get_rule_possible_values(
     self, rule_name: str, selected_facts: dict[Fact, Fact] = {}
-  ) -> dict[Fact, set[Fact]]:
-    # Compute the forced terms
+  ) -> tuple[dict[Fact, set[Fact]], str]:
     rule = self.rules.get(rule_name)
-    restriction: dict[Term, Term] = {}
+    renamed_terms: dict[Term, Term] = {}
     possible_facts: dict[Fact, set[Fact]] = {}
     for fact, other_fact in selected_facts.items():
       renaming_map = self.equational_theory.renamable_to(fact, other_fact)
-      if renaming_map is None:
+      if renaming_map is None or not dict_union(renamed_terms, renaming_map):
         print(f"Selected fact {other_fact} is not compatible with required fact {fact}")
-        return {fact: set() for fact in rule.premises}
-      for k, v in renaming_map.items():
-        if k in restriction:
-          if restriction[k] != v:
-            print(
-              f"Selected facts are not compatible: term {k} is mapped to both {restriction[k]} and {v}"
-            )
-            return {fact: set() for fact in rule.premises}
-        else:
-          restriction[k] = v
+        return {}, "Selected facts are not compatible with the rule premises"
       possible_facts[fact] = {other_fact}
 
-    prune = False
-    new_selected_facts = deepcopy(selected_facts)
-    for fact in rule.premises:
-      if fact not in possible_facts:
+    pruned = True
+    while pruned:
+      pruned = False
+      for fact in rule.premises:
+        if fact.name == "Fr":
+          possible_facts[fact] = set()
+          continue
+        if fact in possible_facts and len(possible_facts[fact]) == 1:
+          continue
         possible_facts[fact] = set()
+
         for state_fact in self.state.state.keys():
-          renaming_map = self.equational_theory.renamable_to(
-            fact, state_fact, restriction=restriction
-          )
-          if renaming_map is not None:
+          renaming_map = self.equational_theory.renamable_to(fact, state_fact)
+          if renaming_map is None or not dict_union(
+            renamed_terms, renaming_map, dry_run=True
+          ):
+            continue
+          satisfy_restrictions = True
+          for restriction_fact in rule.restriction_action_facts:
+            if all(
+              term in renaming_map for term in restriction_fact.get_minimal_terms()
+            ):
+              renamed_restriction_fact = restriction_fact.rename(renaming_map)
+              if any(
+                not restriction.eval(renamed_restriction_fact)
+                for restriction in self.restrictions[restriction_fact.name]
+              ):
+                satisfy_restrictions = False
+                break
+          if satisfy_restrictions:
             possible_facts[fact].add(state_fact)
+
+        if len(possible_facts[fact]) == 0:
+          return possible_facts, "No possible facts found for at least one premise"
         if len(possible_facts[fact]) == 1:
-          new_selected_facts[fact] = possible_facts[fact].pop()
-          prune = True
-    if prune:
-      return self.get_rule_possible_values(rule_name, new_selected_facts)
-    return possible_facts
+          only_possible_fact = next(iter(possible_facts[fact]))
+          renamed_terms.update(
+            self.equational_theory.renamable_to(fact, only_possible_fact)
+          )
+          pruned = True
+          break
+    return possible_facts, ""
 
   def can_apply_rule(
     self,
@@ -146,22 +178,16 @@ class Simulator:
     selected_facts: dict[Fact, Fact] = {},
     public_assignment: dict[Term, Term] = {},
   ) -> dict[Term, Term] | None:
-    restriction: dict[Term, Term] = deepcopy(public_assignment)
+    renamed_terms: dict[Term, Term] = deepcopy(public_assignment)
     for fact in self.rules[rule_name].premises:
       if fact.name == "Fr":
         continue
       if fact not in selected_facts:
         return None
       renaming_map = self.equational_theory.renamable_to(fact, selected_facts.get(fact))
-      if renaming_map is None:
+      if renaming_map is None or not dict_union(renamed_terms, renaming_map):
         return None
-      for k, v in renaming_map.items():
-        if k in restriction:
-          if restriction[k] != v:
-            return None
-        else:
-          restriction[k] = v
-    return restriction
+    return renamed_terms
 
   def apply_rule(self, rule_name: str, renaming_map: dict[Term, Term]):
     if rule_name not in self.rules:
@@ -188,6 +214,16 @@ class Simulator:
         else:
           print(
             f"Cannot apply rule {rule_name}: term {term} is not in the renaming map"
+          )
+          return False
+
+    # Check that the renaming map satisfies the restrictions
+    for restriction_fact in self.rules[rule_name].restriction_action_facts:
+      renamed_restriction_fact = restriction_fact.rename(renaming_map)
+      for restriction in self.restrictions[restriction_fact.name]:
+        if not restriction.eval(renamed_restriction_fact):
+          print(
+            f"Cannot apply rule {rule_name}: restriction {restriction} is not satisfied by fact {renamed_restriction_fact}"
           )
           return False
 
@@ -247,9 +283,20 @@ def simulator_from_path(model_file: str) -> Simulator:
   rules: list[RewriteRule] = []
   for node in rule_nodes:
     rules.append(parse_rule(node))
+
+  restrictions: list[Restriction] = []
+  for node in restriction_nodes:
+    restrction = parse_restriction(node)
+    if restrction is not None:
+      restrictions.append(restrction)
+    else:
+      print(
+        f"Warning: restriction {node.text.decode()} could not be parsed and will be ignored"
+      )
+
   built_ins: list[str] = []
   for node in built_ins_nodes:
     for child in node.children:
       if child.type == "built_in":
         built_ins.append(child.text.decode())
-  return Simulator(rules, built_ins)
+  return Simulator(rules, built_ins, restrictions)

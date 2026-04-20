@@ -1,6 +1,7 @@
 from enum import Enum
 from copy import deepcopy
 from functools import cache
+from .utils import dict_union
 
 type Equation = tuple[Term, Term]
 
@@ -74,6 +75,14 @@ class Term:
         minimal_terms.update(s.get_minimal_terms())
       return minimal_terms
 
+  def is_subterm_of_or_eq_to(self, other: "Term") -> bool:
+    if self == other:
+      return True
+    return any(self.is_subterm_of_or_eq_to(s) for s in other.subterm)
+
+  def is_subterm_of(self, other: "Term") -> bool:
+    return any(self.is_subterm_of_or_eq_to(s) for s in other.subterm)
+
   def rename(self, renaming_map: dict["Term", "Term"]) -> "Term":
     def __dfs(root: Term) -> Term:
       if root.is_constant:
@@ -89,9 +98,8 @@ class Term:
 
     return __dfs(self)
 
-  def renamable_to(
-    self, other: "Term", restriction: dict["Term", "Term"] = {}
-  ) -> dict["Term", "Term"] | None:
+  @cache
+  def renamable_to(self, other: "Term") -> dict["Term", "Term"] | None:
     # Check if self can be renamed to other.
     # any sort is a subsort of MSG
     if self.sort != other.sort and self.sort != Sort.MSG:
@@ -104,19 +112,16 @@ class Term:
       return None
     if len(self.subterm) != len(other.subterm):
       return None
-    renaming_map: dict[Term, Term] = restriction.copy()
+    renaming_map: dict[Term, Term] = {}
     for s1, s2 in zip(self.subterm, other.subterm):
-      subterm_renaming_map = s1.renamable_to(s2, restriction=renaming_map)
+      subterm_renaming_map = s1.renamable_to(s2)
       if subterm_renaming_map is None:
         return None
-      for k, v in subterm_renaming_map.items():
-        if k in renaming_map:
-          if renaming_map[k] != v:
-            return None
-        else:
-          renaming_map[k] = v
+      if not dict_union(renaming_map, subterm_renaming_map):
+        return None
     return renaming_map
 
+  @cache
   def renamable_to_subterm_of(self, other: "Term") -> dict["Term", "Term"] | None:
     renaming_map = self.renamable_to(other)
     if renaming_map is not None:
@@ -163,24 +168,19 @@ class Fact:
     new_terms = [t.rename(renaming_map) for t in self.terms]
     return Fact(self.name, new_terms, self.is_presistent)
 
-  def renamable_to(
-    self, other: "Fact", restriction: dict[Term, Term] = {}
-  ) -> dict[Term, Term] | None:
+  @cache
+  def renamable_to(self, other: "Fact") -> dict[Term, Term] | None:
     if self.name != other.name:
       return None
     if len(self.terms) != len(other.terms):
       return None
-    renaming_map: dict[Term, Term] = restriction.copy()
+    renaming_map: dict[Term, Term] = {}
     for t1, t2 in zip(self.terms, other.terms):
-      term_renaming_map = t1.renamable_to(t2, restriction=renaming_map)
+      term_renaming_map = t1.renamable_to(t2)
       if term_renaming_map is None:
         return None
-      for k, v in term_renaming_map.items():
-        if k in renaming_map:
-          if renaming_map[k] != v:
-            return None
-        else:
-          renaming_map[k] = v
+      if not dict_union(renaming_map, term_renaming_map):
+        return None
     return renaming_map
 
 
@@ -188,6 +188,7 @@ class RewriteRule:
   name: str
   premises: list[Fact]
   actions: list[Fact]
+  restriction_action_facts: list[Fact]
   conclusion: list[Fact]
   atomic_terms: set[Term]
   required_public_terms: list[Term]
@@ -205,6 +206,7 @@ class RewriteRule:
     self.conclusion = conclusion
     self.atomic_terms: set[Term] = set()
     self.required_public_terms: list[Term] = []
+    self.restriction_action_facts = []
 
     for fact in premises:
       self.atomic_terms.update(fact.get_minimal_terms())
@@ -257,30 +259,84 @@ class EquationalTheory:
   def are_equal(self, t1: Term, t2: Term) -> bool:
     return self.normal_form(t1) == self.normal_form(t2)
 
-  def renamable_to(
-    self, t1: Term | Fact, t2: Term | Fact, restriction: dict[Term, Term] = {}
-  ) -> dict[Term, Term] | None:
+  @cache
+  def renamable_to(self, t1: Term | Fact, t2: Term | Fact) -> dict[Term, Term] | None:
     if isinstance(t1, Term) and isinstance(t2, Term):
-      rename_map = self.normal_form(t1).renamable_to(self.normal_form(t2), restriction)
+      rename_map = self.normal_form(t1).renamable_to(self.normal_form(t2))
       return rename_map
     elif isinstance(t1, Fact) and isinstance(t2, Fact):
       if t1.name != t2.name or len(t1.terms) != len(t2.terms):
         return None
       if len(t1.terms) != len(t2.terms):
         return None
-      renaming_map: dict[Term, Term] = restriction.copy()
+      renaming_map: dict[Term, Term] = {}
       for t1_term, t2_term in zip(t1.terms, t2.terms):
-        term_renaming_map = self.renamable_to(
-          t1_term, t2_term, restriction=renaming_map
-        )
+        term_renaming_map = self.renamable_to(t1_term, t2_term)
         if term_renaming_map is None:
           return None
-        for k, v in term_renaming_map.items():
-          if k in renaming_map:
-            if renaming_map[k] != v:
-              return None
-          else:
-            renaming_map[k] = v
+        if not dict_union(renaming_map, term_renaming_map):
+          return None
       return renaming_map
     else:
       raise ValueError("t1 and t2 must be both Term or both Fact")
+
+
+class FormulaType(Enum):
+  EXISTS = "exists"
+  FORALL = "forall"
+  IMPLICATION = "implies"
+  DISJUNCTION = "or"
+  CONJUNCTION = "and"
+  NEGATION = "not"
+  TERM_EQ = "term_eq"
+  SUBTERM_REL = "subterm_rel"
+
+  ATOM = "atom"
+
+
+class Formula:
+  type: FormulaType
+  subformulas: list["Formula" | Term | Fact]
+
+  def __init__(self, type: FormulaType = None, subformulas: list["Formula"] = []):
+    self.type = type
+    self.subformulas = subformulas
+
+
+class Restriction:
+  name: str
+  fact: Fact
+  formula: Formula
+
+  def __init__(self, name: str, fact: Fact, formula: Formula):
+    self.name = name
+    self.fact = fact
+    self.formula = formula
+
+  @cache
+  def eval(self, fact: Fact) -> bool:
+    renaming_map = self.fact.renamable_to(fact)
+    if renaming_map is None:
+      return False
+
+    def _eval(formula: Formula) -> bool:
+      if formula.type == FormulaType.IMPLICATION:
+        return not _eval(formula.subformulas[0]) or _eval(formula.subformulas[1])
+      elif formula.type == FormulaType.DISJUNCTION:
+        return any(_eval(subf) for subf in formula.subformulas)
+      elif formula.type == FormulaType.CONJUNCTION:
+        return all(_eval(subf) for subf in formula.subformulas)
+      elif formula.type == FormulaType.NEGATION:
+        return not _eval(formula.subformulas[0])
+      elif formula.type == FormulaType.TERM_EQ:
+        assert len(formula.subformulas) == 2
+        t1, t2 = formula.subformulas
+        assert isinstance(t1, Term) and isinstance(t2, Term)
+        return t1.rename(renaming_map) == t2.rename(renaming_map)
+      elif formula.type == FormulaType.SUBTERM_REL:
+        assert len(formula.subformulas) == 2
+        t1, t2 = formula.subformulas
+        assert isinstance(t1, Term) and isinstance(t2, Term)
+        return t1.rename(renaming_map).is_subterm_of(t2.rename(renaming_map))
+
+    return _eval(self.formula)
