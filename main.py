@@ -45,6 +45,9 @@ class TamarinModelSimulator(App):
   .overflow-auto {
     overflow: auto;
   }
+  .hide {
+    display: none;
+  }
   """
   simulator: reactive[Simulator] = reactive(Simulator, recompose=True)
   status: reactive[str] = reactive("", recompose=True)
@@ -105,7 +108,7 @@ class TamarinModelSimulator(App):
                   for i, p in enumerate(self.selected_rule.premises):
                     yield Static(str(p))
                     yield Select(
-                      ((str(fact), fact) for fact in self.possible_facts[p]),
+                      ((str(fact), fact) for fact in sorted(self.possible_facts[p], key=str)),
                       value=self.selected_values.get(
                         p,
                         Select.NULL
@@ -142,8 +145,8 @@ class TamarinModelSimulator(App):
           ):
             with TabPane("State", id="state_tab"):
               with Container(classes="overflow-auto"):
-                with ListView(disabled=True, initial_index=None):
-                  for fact, count in self.simulator.state.state.items():
+                with ListView(initial_index=None):
+                  for fact, count in reversed(self.simulator.state.state.items()):
                     if fact.name not in ["Out", "In", "KU", "KD"]:
                       yield ListItem(
                         Static(f"{fact} (x{count})" if count > 1 else str(fact)),
@@ -151,8 +154,8 @@ class TamarinModelSimulator(App):
                       )
             with TabPane("In/Out", id="io_tab"):
               with Container(classes="overflow-auto"):
-                with ListView(disabled=True, initial_index=None):
-                  for fact, count in self.simulator.state.state.items():
+                with ListView(initial_index=None):
+                  for fact, count in reversed(self.simulator.state.state.items()):
                     if fact.name in ["Out", "In"]:
                       yield ListItem(
                         Static(f"{fact} (x{count})" if count > 1 else str(fact)),
@@ -160,8 +163,8 @@ class TamarinModelSimulator(App):
                       )
             with TabPane("KU/KD", id="k_tab"):
               with Container(classes="overflow-auto"):
-                with ListView(disabled=True, initial_index=None):
-                  for fact, count in self.simulator.state.state.items():
+                with ListView(initial_index=None):
+                  for fact, count in reversed(self.simulator.state.state.items()):
                     if fact.name in ["KU", "KD"]:
                       yield ListItem(
                         Static(f"{fact} (x{count})" if count > 1 else str(fact)),
@@ -171,7 +174,7 @@ class TamarinModelSimulator(App):
           with TabbedContent():
             with TabPane("Trace"):
               with Container(classes="overflow-auto"):
-                with ListView(disabled=True, initial_index=None):
+                with ListView(initial_index=None):
                   for idx, facts in enumerate(
                     reversed(self.simulator.state.trace[: self.simulator.state.time])
                   ):
@@ -216,10 +219,8 @@ class TamarinModelSimulator(App):
       )
       self.mutate_reactive(TamarinModelSimulator.possible_facts)
 
-  def on_tabbed_content_tab_activated(self, event):
-    self.selected_tabs[event.tabbed_content.id] = event.tabbed_content.get_pane(
-      event.tab
-    ).id
+  def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated):
+    self.selected_tabs[event.tabbed_content.id] = event.pane.id
 
   def action_clear(self):
     if self.selected_rule is None:
@@ -252,6 +253,7 @@ class TamarinModelSimulator(App):
   def action_undo(self):
     if self.simulator.state.undo():
       self.status = "Undid last action."
+      self.action_clear()
       self.mutate_reactive(TamarinModelSimulator.status)
       self.recompose_simulator()
     else:
@@ -261,6 +263,7 @@ class TamarinModelSimulator(App):
   def action_redo(self):
     if self.simulator.state.redo():
       self.status = "Redid last undone action."
+      self.action_clear()
       self.mutate_reactive(TamarinModelSimulator.status)
       self.recompose_simulator()
     else:
