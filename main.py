@@ -25,6 +25,7 @@ class TamarinModelSimulator(App):
     Binding(key="U", action="redo()", description="Redo"),
     Binding(key="c", action="clear()", description="Clear selections"),
     Binding(key="enter", action="apply()", description="Apply Rule"),
+    Binding(key="backspace", action="back()", description="Back"),
   ]
   CSS = """
   #status-container {
@@ -284,6 +285,12 @@ class TamarinModelSimulator(App):
     else:
       self.status = "No actions to redo."
       self.mutate_reactive(TamarinModelSimulator.status)
+
+  def action_back(self):
+    self.selected_rule = None
+    self.selected_values = {}
+    self.selected_tabs["rules_tabs"] = "rules_tab"
+    self.query_one("#rules_tabs", TabbedContent).active = "rules_tab"
 
 
 def parse_args():

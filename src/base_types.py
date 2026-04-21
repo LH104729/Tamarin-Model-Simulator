@@ -22,6 +22,7 @@ class Term:
   subterm: list["Term"]
   sort: Sort
   is_constant: bool
+  minimal_terms: set["Term"]
 
   def __init__(
     self,
@@ -36,6 +37,10 @@ class Term:
     self.is_constant = is_constant
     if self.sort == Sort.NAT and self.name == "1":
       self.is_constant = True
+
+    self.minimal_terms = set()
+    for s in self.subterm:
+      self.minimal_terms.update(s.get_minimal_terms())
 
   def __str__(self):
     if self.subterm:
@@ -70,10 +75,10 @@ class Term:
     if not self.subterm:
       return {self}
     else:
-      minimal_terms = set()
-      for s in self.subterm:
-        minimal_terms.update(s.get_minimal_terms())
-      return minimal_terms
+      return self.minimal_terms
+
+  def get_subterms(self) -> set["Term"]:
+    return self.subterm
 
   def is_subterm_of_or_eq_to(self, other: "Term") -> bool:
     if self == other:
@@ -88,13 +93,11 @@ class Term:
       if root.is_constant:
         return root
       if root in renaming_map:
-        return deepcopy(renaming_map[root])
-      else:
-        if len(root.subterm) == 0:
-          return deepcopy(root)
-        else:
-          new_subterm = [__dfs(s) for s in root.subterm]
-          return Term(root.name, new_subterm, root.sort, root.is_constant)
+        return renaming_map[root]
+      if len(root.get_subterms()) == 0:
+        return root
+      new_subterm = [__dfs(s) for s in root.get_subterms()]
+      return Term(root.name, new_subterm, root.sort, root.is_constant)
 
     return __dfs(self)
 
@@ -137,11 +140,15 @@ class Fact:
   name: str
   terms: list[Term]
   is_presistent: bool
+  minimal_terms: set[Term]
 
   def __init__(self, name: str, terms: list[Term], is_presistent=False):
     self.name = name
     self.terms = terms
     self.is_presistent = is_presistent
+    self.minimal_terms = set()
+    for t in self.terms:
+      self.minimal_terms.update(t.get_minimal_terms())
 
   def __str__(self):
     return f"{'!' if self.is_presistent else ''}{self.name}({', '.join(str(t) for t in self.terms)})"
@@ -159,10 +166,7 @@ class Fact:
     return hash((self.name, tuple(self.terms), self.is_presistent))
 
   def get_minimal_terms(self) -> set[Term]:
-    minimal_terms = set()
-    for t in self.terms:
-      minimal_terms.update(t.get_minimal_terms())
-    return minimal_terms
+    return self.minimal_terms
 
   def rename(self, renaming_map: dict[Term, Term]) -> "Fact":
     new_terms = [t.rename(renaming_map) for t in self.terms]
@@ -187,6 +191,7 @@ class Fact:
 class RewriteRule:
   name: str
   premises: list[Fact]
+  # premises_facts: dict[str, list[Fact]]
   actions: list[Fact]
   restriction_action_facts: list[Fact]
   conclusion: list[Fact]
@@ -210,6 +215,7 @@ class RewriteRule:
 
     for fact in premises:
       self.atomic_terms.update(fact.get_minimal_terms())
+      # self.premises_facts.setdefault(fact.name, []).append(fact)
     for fact in actions:
       for t in fact.get_minimal_terms():
         if t not in self.atomic_terms:

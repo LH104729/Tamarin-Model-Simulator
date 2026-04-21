@@ -265,12 +265,11 @@ def simulator_from_path(model_file: str) -> Simulator:
   parser = Parser(Language(tsspthy.language()))
   with open(model_file, "r") as f:
     tree = parser.parse(f.read().encode())
-
   rule_nodes: list[Node] = []
   restriction_nodes: list[Node] = []
   built_ins_nodes: list[Node] = []
   functions_nodes: list[Node] = []
-  for child in tree.root_node.children[0].children:
+  for child in tree.root_node.children:
     if child.type == "rule":
       rule_nodes.append(child)
     elif child.type == "restriction":
