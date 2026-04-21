@@ -1,4 +1,4 @@
 argparse
 tree-sitter
 textual
-./deps/vscode-tamarin/server/grammar/spthy
+./deps/tamarin-prover/tree-sitter/tree-sitter-spthy
